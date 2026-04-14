@@ -2,9 +2,6 @@ import cv2
 from ultralytics import YOLO
 from dataclasses import dataclass
 
-WIDTH  = 640
-HEIGHT = 480
-
 @dataclass
 class Point:
     x: float
@@ -46,29 +43,37 @@ def intersect(v1: Point, v2: Point, v3: Point, v4: Point):
     return (cross2d(v1v2, v1v3) * cross2d(v1v2, v1v4) <= 0
         and cross2d(v3v4, v3v1) * cross2d(v3v4, v3v2) <= 0)
 
-model = YOLO(model='yolov8n.pt')
+model = YOLO(model='yolov8s.pt')
 print('Model loaded')
-cap = cv2.VideoCapture(0)
+# cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture('video2.mp4')
+WIDTH  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+HEIGHT = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 # 判定するライン
-line_y1 = 300
-line_y2 = 150
+line_x1 = WIDTH // 2 - 320
+line_x2 = WIDTH // 2 + 320
+line_y1 = HEIGHT // 2
+line_y2 = HEIGHT // 2
 
-line_p1 = Point(0, line_y1)
-line_p2 = Point(WIDTH, line_y2)
+line_p1 = Point(line_x1, line_y1)
+line_p2 = Point(line_x2, line_y2)
 
 track_history = {}
 count_in = 0
 count_out = 0
-counted_ids_in  = set()
-counted_ids_out = set()
+
+counted_ids = set()
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    results = model.track(frame, persist=True)
+    results = model.track(frame, 
+                          classes=[0], 
+                          conf=0.5,
+                          persist=True)
     if results[0].boxes is None:
         continue
 
@@ -84,6 +89,9 @@ while True:
     scores = results[0].boxes.conf.cpu().numpy()
 
     for box, track_id, cls, score in zip(boxes, ids, classes, scores):
+        if cls != 0:
+            continue
+
         x1, y1, x2, y2 = map(int, box)
         label = results[0].names[cls]
 
@@ -106,21 +114,20 @@ while True:
 
             # 線分交差判定
             if intersect(prev_pt, curr_pt, line_p1, line_p2):
-                if track_id not in counted_ids_in or track_id not in counted_ids_out:
+                if track_id not in counted_ids:
                     # 方向検出
                     direction = cross2d(line_p2 - line_p1, curr_pt - prev_pt)
 
                     if direction > 0:
                         count_in += 1
-                        counted_ids_in.add(track_id)
                     else:
                         count_out += 1
-                        counted_ids_out.add(track_id)
+                    counted_ids.add(track_id)
 
         track_history[track_id] = Point(cx, cy)
 
 
-    cv2.line(frame, (0, line_y1), (WIDTH, line_y2), (255, 0, 0), 2)
+    cv2.line(frame, (line_x1, line_y1), (line_x2, line_y2), (255, 0, 0), 2)
     cv2.putText(frame, f'IN: {count_in}',   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
     cv2.putText(frame, f'OUT: {count_out}', (100, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
     cv2.imshow("frame", frame)
